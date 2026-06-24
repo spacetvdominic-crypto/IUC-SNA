@@ -3,36 +3,47 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Secure Manifest Intake</title>
+    <title>High-Speed Intake Scanner</title>
     <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 500px; margin: 0 auto; padding: 12px; background: #f5f5f7; color: #1d1d1f; }
-        h1 { text-align: center; font-size: 22px; margin: 10px 0; font-weight: 700; }
+        h1 { text-align: center; font-size: 22px; margin: 10px 0; color: #1d1d1f; font-weight: 700; }
         .card { background: white; padding: 16px; border-radius: 14px; box-shadow: 0 4px 12px rgba(0,0,0,0.06); margin-bottom: 12px; }
+        
+        /* Continuous Autofocus Viewport */
         #scanner-container { width: 100%; border-radius: 14px; overflow: hidden; background: #000; margin-bottom: 12px; position: relative; border: 4px solid #86868b; transition: border-color 0.15s ease; }
         #reader { width: 100% !important; border: none !important; }
-        .status-display { padding: 14px; border-radius: 10px; text-align: center; font-weight: bold; font-size: 16px; margin-bottom: 12px; background: #0071e3; color: white; }
+        
+        .status-display { padding: 14px; border-radius: 10px; text-align: center; font-weight: bold; font-size: 16px; margin-bottom: 12px; background: #0071e3; color: white; transition: all 0.15s ease; }
         .flash-success { background: #34c759 !important; }
         .status-waiting { background: #ff9500 !important; }
+        
         ul { list-style: none; padding: 0; margin: 0; }
         li { background: #f5f5f7; padding: 12px; border-radius: 8px; margin-bottom: 6px; font-family: monospace; font-size: 14px; display: flex; justify-content: space-between; align-items: center; border-left: 4px solid #0071e3; }
         .sc-num { color: #0071e3; font-weight: bold; }
-        .action-btn { background: #34c759; color: white; width: 100%; padding: 16px; font-size: 17px; border-radius: 10px; border: none; font-weight: bold; margin-top: 15px; }
-        .action-btn:disabled { background: #a1a1a6; }
-        .clear-btn { background: #ff3b30; color: white; width: 100%; padding: 12px; font-size: 14px; border-radius: 8px; border: none; font-weight: bold; margin-top: 8px; }
+        
+        .action-btn { background: #34c759; color: white; width: 100%; padding: 16px; font-size: 17px; border-radius: 10px; border: none; font-weight: bold; margin-top: 15px; -webkit-tap-highlight-color: transparent; }
+        .action-btn:disabled { background: #a1a1a6; cursor: not-allowed; }
+        .clear-btn { background: #ff3b30; color: white; width: 100%; padding: 12px; font-size: 14px; border-radius: 8px; border: none; font-weight: bold; margin-top: 8px; -webkit-tap-highlight-color: transparent; }
     </style>
 </head>
 <body>
 
-    <h1>📥 Secure Intake Scanner</h1>
-    <div id="scanner-container"><div id="reader"></div></div>
-    <div id="statusBox" class="status-display">STEP 1: Scan Master Carton QR Code</div>
+    <h1>📥 High-Speed Production Intake</h1>
+
+    <div id="scanner-container">
+        <div id="reader"></div>
+    </div>
+
+    <div id="statusBox" class="status-display">
+        STEP 1: Scan Master Carton QR Code
+    </div>
 
     <div id="intakeCard" class="card" style="display: none;">
-        <h3 id="intakeCartonTitle" style="margin: 0 0 12px 0; font-size: 18px;">Box ID: Not Set</h3>
+        <h3 id="intakeCartonTitle" style="margin: 0 0 12px 0; color:#1d1d1f; font-size: 18px;">Box ID: Not Set</h3>
         <ul id="intakeList"></ul>
-        <button id="saveBtn" onclick="saveBox()" class="action-btn">💾 Upload to Google Sheets</button>
-        <button id="clearBtn" onclick="resetIntake()" class="clear-btn">🔄 Clear & Restart</button>
+        <button id="saveBtn" onclick="saveBox()" class="action-btn">💾 Save Box Manifest</button>
+        <button id="clearBtn" onclick="resetIntake()" class="clear-btn">🔄 Clear & Restart Box</button>
     </div>
 
 <script>
@@ -52,39 +63,65 @@
             { fps: 24, qrbox: (w, h) => ({ width: w * 0.85, height: h * 0.55 }) }, 
             onScanSuccess
         ).catch(err => {
-            document.getElementById('statusBox').innerText = "⚠️ Camera blocked. Open directly in Safari.";
+            document.getElementById('statusBox').style.background = "#ff3b30";
+            document.getElementById('statusBox').innerText = "⚠️ Open this file in Safari for camera tracking.";
         });
+    }
+
+    // Direct interface green confirmation flash
+    function triggerVisualFeedback() {
+        const container = document.getElementById('scanner-container');
+        const statusBox = document.getElementById('statusBox');
+        container.style.borderColor = '#34c759';
+        statusBox.classList.add('flash-success');
+        
+        setTimeout(() => {
+            container.style.borderColor = '#86868b';
+            statusBox.classList.remove('flash-success');
+        }, 300);
     }
 
     function onScanSuccess(decodedText) {
         const now = Date.now();
+        // Prevent duplicate immediate rapid reads
         if (decodedText === lastScannedCode && (now - lastScanTime) < 1200) return; 
+        
         lastScannedCode = decodedText;
         lastScanTime = now;
-        
+        triggerVisualFeedback();
+
+        // Strip text label noise if it exists
         let cleaned = decodedText.replace(/Ser No:|IUC\/SC:/g, '').trim();
         processIntakeScan(cleaned);
     }
 
     function processIntakeScan(code) {
         const statusBox = document.getElementById('statusBox');
+        
+        // Phase 1: Set Carton Target Identification
         if (!currentCarton) {
             currentCarton = code;
             document.getElementById('intakeCard').style.display = 'block';
-            document.getElementById('intakeCartonTitle').innerText = `📦 Box: ${currentCarton}`;
-            statusBox.innerText = "Box Set. Scan Serial Barcode...";
+            document.getElementById('intakeCartonTitle').innerText = `📦 Current Box: ${currentCarton}`;
+            statusBox.className = "status-display";
+            statusBox.innerText = "Box Identified. Scan Serial Barcode...";
+            expectsSerial = true;
             return;
         }
+
+        // Phase 2: Add Package Records
         temporaryBarcodes.push(code);
+        
         if (expectsSerial) {
             statusBox.className = "status-display status-waiting";
-            statusBox.innerText = `Scan matching IUC...`;
+            statusBox.innerText = `Captured SN. Scan matching IUC...`;
             expectsSerial = false;
         } else {
             statusBox.className = "status-display";
-            statusBox.innerText = `Pair added. Scan next Serial...`;
+            statusBox.innerText = `Pair complete. Scan next Serial...`;
             expectsSerial = true;
         }
+        
         updateIntakeUI();
     }
 
@@ -93,40 +130,57 @@
         list.innerHTML = '';
         for (let i = 0; i < temporaryBarcodes.length; i += 2) {
             const li = document.createElement('li');
-            li.innerHTML = `<span><strong>SN:</strong> ${temporaryBarcodes[i]}</span> <span class="sc-num">IUC: ${temporaryBarcodes[i+1] || '⏳'}</span>`;
+            const serial = temporaryBarcodes[i];
+            const iuc = temporaryBarcodes[i+1] || '⏳ Awaiting companion IUC...';
+            li.innerHTML = `<span><strong>SN:</strong> ${serial}</span> <span class="sc-num">IUC: ${iuc}</span>`;
             list.appendChild(li);
         }
     }
 
     function saveBox() {
         if (!currentCarton || temporaryBarcodes.length === 0) return;
+        
         const saveBtn = document.getElementById('saveBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        
         saveBtn.disabled = true;
-        saveBtn.innerText = "⚡ Securely Saving...";
+        clearBtn.disabled = true;
+        saveBtn.innerText = "⚡ Uploading to Google Sheets...";
         
         let pairs = [];
         for (let i = 0; i < temporaryBarcodes.length; i += 2) {
             pairs.push({ serial: temporaryBarcodes[i], iuc: temporaryBarcodes[i+1] || 'N/A' });
         }
 
-        // POST securely to our internal Vercel function route
+        // Send to your secure Vercel backend route
         fetch("/api/save", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ carton: currentCarton, pairs: pairs })
         })
         .then(res => {
-            if (!res.ok) throw new Error("Upload failing via backend route.");
-            alert("Manifest uploaded successfully!");
+            if (!res.ok) throw new Error("Upload failed via server route.");
+            alert(`Box ${currentCarton} successfully sent to Google Sheets!`);
             resetIntake();
         })
-        .catch(err => alert("Error: " + err.message))
-        .finally(() => { saveBtn.disabled = false; saveBtn.innerText = "💾 Upload to Google Sheets"; });
+        .catch(err => {
+            alert("Error saving: " + err.message);
+        })
+        .finally(() => {
+            saveBtn.disabled = false;
+            clearBtn.disabled = false;
+            saveBtn.innerText = "💾 Save Box Manifest";
+        });
     }
 
     function resetIntake() {
-        currentCarton = ''; temporaryBarcodes = []; expectsSerial = true;
+        currentCarton = '';
+        temporaryBarcodes = [];
+        expectsSerial = true;
+        document.getElementById('intakeCartonTitle').innerText = `Box ID: Not Set`;
         document.getElementById('intakeCard').style.display = 'none';
+        document.getElementById('intakeList').innerHTML = '';
+        document.getElementById('statusBox').className = "status-display";
         document.getElementById('statusBox').innerHTML = "STEP 1: Scan Master Carton QR Code";
     }
 </script>
