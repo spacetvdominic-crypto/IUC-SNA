@@ -152,7 +152,10 @@
             pairs.push({ serial: temporaryBarcodes[i], iuc: temporaryBarcodes[i+1] || 'N/A' });
         }
 
-        // Send to your secure Vercel backend route
+        // Keep local storage copy as backup
+        localStorage.setItem(currentCarton, JSON.stringify(pairs));
+
+        // POST the exactly parsed pairs directly over to your secure Vercel backend route
         fetch("/api/save", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -164,12 +167,11 @@
             resetIntake();
         })
         .catch(err => {
-            alert("Error saving: " + err.message);
-        })
-        .finally(() => {
+            alert("Local Save Successful! Cloud Upload Error: " + err.message);
+            // Don't reset if it fails so the data isn't lost on screen
             saveBtn.disabled = false;
             clearBtn.disabled = false;
-            saveBtn.innerText = "💾 Save Box Manifest";
+            saveBtn.innerText = "💾 Retry Save Manifest";
         });
     }
 
