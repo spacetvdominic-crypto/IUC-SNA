@@ -25,6 +25,11 @@
         .action-btn { background: #34c759; color: white; width: 100%; padding: 16px; font-size: 17px; border-radius: 10px; border: none; font-weight: bold; margin-top: 15px; -webkit-tap-highlight-color: transparent; }
         .action-btn:disabled { background: #a1a1a6; cursor: not-allowed; }
         .clear-btn { background: #ff3b30; color: white; width: 100%; padding: 12px; font-size: 14px; border-radius: 8px; border: none; font-weight: bold; margin-top: 8px; -webkit-tap-highlight-color: transparent; }
+        
+        /* Sync Cache Dashboard Panel */
+        .sync-card { background: #1d1d1f; color: white; border-radius: 14px; padding: 16px; margin-top: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+        .sync-btn { background: #0071e3; color: white; border: none; padding: 12px; width: 100%; border-radius: 8px; font-weight: bold; font-size: 15px; margin-top: 10px; }
+        .sync-btn:disabled { background: #424245; color: #86868b; }
     </style>
 </head>
 <body>
@@ -46,6 +51,12 @@
         <button id="clearBtn" onclick="resetIntake()" class="clear-btn">🔄 Clear & Restart Box</button>
     </div>
 
+    <div class="sync-card">
+        <h3 style="margin: 0 0 8px 0; font-size: 16px;">📦 Local Storage Queue (Offline Safe)</h3>
+        <p id="queueStatus" style="margin: 0; font-size: 14px; color: #a1a1a6;">0 Boxes waiting to sync.</p>
+        <button id="syncBtn" onclick="syncQueueToCloud()" class="sync-btn" disabled>⚡ Sync Queue to Google Sheets</button>
+    </div>
+
 <script>
     let currentCarton = '';
     let temporaryBarcodes = [];
@@ -54,7 +65,10 @@
     let lastScanTime = 0;
     let expectsSerial = true;
 
-    window.addEventListener('DOMContentLoaded', () => { initCamera(); });
+    window.addEventListener('DOMContentLoaded', () => { 
+        initCamera(); 
+        updateQueueUI();
+    });
 
     function initCamera() {
         html5QrcodeScanner = new Html5Qrcode("reader");
@@ -68,7 +82,6 @@
         });
     }
 
-    // Direct interface green confirmation flash
     function triggerVisualFeedback() {
         const container = document.getElementById('scanner-container');
         const statusBox = document.getElementById('statusBox');
@@ -83,14 +96,12 @@
 
     function onScanSuccess(decodedText) {
         const now = Date.now();
-        // Prevent duplicate immediate rapid reads
         if (decodedText === lastScannedCode && (now - lastScanTime) < 1200) return; 
         
         lastScannedCode = decodedText;
         lastScanTime = now;
         triggerVisualFeedback();
 
-        // Strip text label noise if it exists
         let cleaned = decodedText.replace(/Ser No:|IUC\/SC:/g, '').trim();
         processIntakeScan(cleaned);
     }
@@ -98,7 +109,6 @@
     function processIntakeScan(code) {
         const statusBox = document.getElementById('statusBox');
         
-        // Phase 1: Set Carton Target Identification
         if (!currentCarton) {
             currentCarton = code;
             document.getElementById('intakeCard').style.display = 'block';
@@ -109,7 +119,6 @@
             return;
         }
 
-        // Phase 2: Add Package Records
         temporaryBarcodes.push(code);
         
         if (expectsSerial) {
@@ -137,42 +146,81 @@
         }
     }
 
+    // SAVING: Saves instantly offline to memory without needing any network
     function saveBox() {
         if (!currentCarton || temporaryBarcodes.length === 0) return;
-        
-        const saveBtn = document.getElementById('saveBtn');
-        const clearBtn = document.getElementById('clearBtn');
-        
-        saveBtn.disabled = true;
-        clearBtn.disabled = true;
-        saveBtn.innerText = "⚡ Uploading to Google Sheets...";
         
         let pairs = [];
         for (let i = 0; i < temporaryBarcodes.length; i += 2) {
             pairs.push({ serial: temporaryBarcodes[i], iuc: temporaryBarcodes[i+1] || 'N/A' });
         }
 
-        // Keep local storage copy as backup
-        localStorage.setItem(currentCarton, JSON.stringify(pairs));
+        // Pull existing offline master list or create a blank tracking container array
+        let manifestQueue = JSON.parse(localStorage.getItem('manifestQueue') || '[]');
+        
+        // Push the new box data right into memory stash
+        manifestQueue.push({ carton: currentCarton, pairs: pairs });
+        localStorage.setItem('manifestQueue', JSON.stringify(manifestQueue));
+        
+        alert(`Box ${currentCarton} successfully saved locally! (${pairs.length} pairs ready to sync later)`);
+        
+        resetIntake();
+        updateQueueUI();
+    }
 
-        // POST the exactly parsed pairs directly over to your secure Vercel backend route
-        fetch("/api/save", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ carton: currentCarton, pairs: pairs })
-        })
-        .then(res => {
-            if (!res.ok) throw new Error("Upload failed via server route.");
-            alert(`Box ${currentCarton} successfully sent to Google Sheets!`);
-            resetIntake();
-        })
-        .catch(err => {
-            alert("Local Save Successful! Cloud Upload Error: " + err.message);
-            // Don't reset if it fails so the data isn't lost on screen
-            saveBtn.disabled = false;
-            clearBtn.disabled = false;
-            saveBtn.innerText = "💾 Retry Save Manifest";
+    function updateQueueUI() {
+        const queue = JSON.parse(localStorage.getItem('manifestQueue') || '[]');
+        const statusText = document.getElementById('queueStatus');
+        const syncBtn = document.getElementById('syncBtn');
+        
+        if (queue.length === 0) {
+            statusText.innerText = "✨ No boxes waiting to sync. Storage clean.";
+            statusText.style.color = "#34c759";
+            syncBtn.disabled = true;
+            syncBtn.innerText = "⚡ Sync Queue to Google Sheets";
+        } else {
+            statusText.innerText = `⚠️ ${queue.length} Box(es) stored locally and ready to upload.`;
+            statusText.style.color = "#ff9500";
+            syncBtn.disabled = false;
+            syncBtn.innerText = `⚡ Upload ${queue.length} Box(es) to Sheets`;
+        }
+    }
+
+    // SYNCING: Sends all local stored boxes down to Vercel endpoint in batches
+    function syncQueueToCloud() {
+        const queue = JSON.parse(localStorage.getItem('manifestQueue') || '[]');
+        if (queue.length === 0) return;
+
+        const syncBtn = document.getElementById('syncBtn');
+        syncBtn.disabled = true;
+        syncBtn.innerText = "📡 Processing Cloud Sync...";
+
+        // Process loop through each box cached in your local vault
+        let promises = queue.map(box => {
+            return fetch("/api/save", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ carton: box.carton, pairs: box.pairs })
+            });
         });
+
+        Promise.all(promises)
+            .then(responses => {
+                // Confirm all endpoints hit a clean 200 status pass
+                const allSuccessful = responses.every(res => res.ok);
+                if (allSuccessful) {
+                    alert("🚀 All local box data successfully pushed to Google Sheets!");
+                    localStorage.removeItem('manifestQueue'); // Clear local cache on successful sync
+                } else {
+                    alert("⚠️ Some items failed to sync. Keeping storage saved.");
+                }
+            })
+            .catch(err => {
+                alert("Network error: Could not reach host server. Stored data is safe. Error: " + err.message);
+            })
+            .finally(() => {
+                updateQueueUI();
+            });
     }
 
     function resetIntake() {
