@@ -48,6 +48,7 @@
 <script>
     let currentCarton = '';
     let temporaryBarcodes = [];
+    let scannedHistory = []; // NEW: Keeps track of barcodes already captured for this box
     let html5QrcodeScanner = null;
     let lastScannedCode = '';
     let lastScanTime = 0;
@@ -67,7 +68,6 @@
         });
     }
 
-    // Direct interface green confirmation flash
     function triggerVisualFeedback() {
         const container = document.getElementById('scanner-container');
         const statusBox = document.getElementById('statusBox');
@@ -85,12 +85,19 @@
         // Prevent duplicate immediate rapid reads
         if (decodedText === lastScannedCode && (now - lastScanTime) < 1200) return; 
         
+        // Strip text label noise if it exists
+        let cleaned = decodedText.replace(/Ser No:|IUC\/SC:/g, '').trim();
+
+        // NEW: HARD BLOCK DUPLICATES. If this exact code has already been scanned for this current box session, reject it silently.
+        if (scannedHistory.includes(cleaned)) {
+            console.log("Duplicate scan blocked: " + cleaned);
+            return; 
+        }
+        
         lastScannedCode = decodedText;
         lastScanTime = now;
         triggerVisualFeedback();
 
-        // Strip text label noise if it exists
-        let cleaned = decodedText.replace(/Ser No:|IUC\/SC:/g, '').trim();
         processIntakeScan(cleaned);
     }
 
@@ -100,6 +107,7 @@
         // Phase 1: Set Carton Target Identification
         if (!currentCarton) {
             currentCarton = code;
+            scannedHistory.push(code); // Remember the master carton code
             document.getElementById('intakeCard').style.display = 'block';
             document.getElementById('intakeCartonTitle').innerText = `📦 Current Box: ${currentCarton}`;
             statusBox.className = "status-display";
@@ -110,6 +118,7 @@
 
         // Phase 2: Add Package Records
         temporaryBarcodes.push(code);
+        scannedHistory.push(code); // Remember this serial or IUC so it can never be scanned again for this box
         
         if (expectsSerial) {
             statusBox.className = "status-display status-waiting";
@@ -143,10 +152,8 @@
             pairs.push({ serial: temporaryBarcodes[i], iuc: temporaryBarcodes[i+1] || 'N/A' });
         }
         
-        // Keep your original local backup step
         localStorage.setItem(currentCarton, JSON.stringify(pairs));
         
-        // Added connection step: Send data payload over to Vercel secure function route
         fetch("/api/save", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -158,7 +165,6 @@
             resetIntake();
         })
         .catch(err => {
-            // Safe fallback if network drops: tells you it saved locally anyway
             alert(`Saved Locally! (Google Sheet Sync Error: ${err.message})`);
             resetIntake();
         });
@@ -167,6 +173,7 @@
     function resetIntake() {
         currentCarton = '';
         temporaryBarcodes = [];
+        scannedHistory = []; // NEW: Clear out the memory list so the next box can start fresh!
         expectsSerial = true;
         document.getElementById('intakeCartonTitle').innerText = `Box ID: Not Set`;
         document.getElementById('intakeCard').style.display = 'none';
